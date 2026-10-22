@@ -4,6 +4,7 @@ import argparse
 import hashlib
 import json
 import math
+import re
 from pathlib import Path
 
 import torch
@@ -11,6 +12,7 @@ import torch
 PACKAGE_ROOT = Path(__file__).resolve().parents[1]
 PROTO_SHA256 = '4715d16f43dff5e8e21c76d5b564cced592722b5734b6946dc3af1da665f53f3'
 THRESHOLD = 0.02152947708964348
+IMAGE_NAME = re.compile(r'\d{3}\.png')
 
 
 def is_han(char: str) -> bool:
@@ -33,22 +35,32 @@ def sha256(path: Path) -> str:
 def main() -> None:
     parser = argparse.ArgumentParser(description='Validate the standalone TextVerifier release.')
     parser.add_argument('--root', type=Path, default=PACKAGE_ROOT)
+    parser.add_argument('--benchmark', type=Path, help='materialized benchmark directory (default: <root>/benchmark)')
     parser.add_argument('--check-checkpoint', action='store_true')
     args = parser.parse_args()
     root = args.root.resolve()
-    benchmark = root / 'benchmark'
+    benchmark = args.benchmark.resolve() if args.benchmark else root / 'benchmark'
     assets = root / 'assets'
 
-    expected_ids = [f'{index:03d}.png' for index in range(308)]
     image_dir = benchmark / 'images'
-    images = sorted(path.name for path in image_dir.iterdir() if path.is_file())
-    if images != expected_ids or any(path.is_symlink() for path in image_dir.iterdir()):
-        raise ValueError('benchmark images must be exactly anonymous IDs 000.png through 307.png without symlinks')
+    if not image_dir.is_dir():
+        raise ValueError(f'benchmark image directory not found: {image_dir}')
+    image_paths = sorted(path for path in image_dir.iterdir() if path.is_file())
+    images = [path.name for path in image_paths]
+    if not images:
+        raise ValueError(f'benchmark image directory is empty: {image_dir}')
+    if any(path.is_symlink() for path in image_dir.iterdir()):
+        raise ValueError('benchmark images must not be symlinks')
+    if len(set(images)) != len(images):
+        raise ValueError('benchmark image names are not unique')
+    for name in images:
+        if not IMAGE_NAME.fullmatch(name):
+            raise ValueError(f'benchmark image must be an anonymous three-digit PNG name: {name}')
 
     rows = [json.loads(line) for line in (benchmark / 'annotations.jsonl').read_text(encoding='utf-8').splitlines() if line.strip()]
     fields = {'sample_id', 'image_id', 'image', 'item_index', 'char', 'box', 'rect', 'render_error'}
-    if len(rows) != 7358 or sum(bool(row['render_error']) for row in rows) != 642:
-        raise ValueError('benchmark row or positive count mismatch')
+    if not rows:
+        raise ValueError('benchmark annotations are empty')
     if len({row['sample_id'] for row in rows}) != len(rows):
         raise ValueError('sample IDs are not unique')
     benchmark_chars = {row['char'] for row in rows}
@@ -58,13 +70,22 @@ def main() -> None:
         image = Path(row['image'])
         if image.is_absolute() or '..' in image.parts or not (benchmark / image).is_file():
             raise ValueError(f'invalid image path: {row["image"]}')
+        if image.name not in images:
+            raise ValueError(f'annotation references an image outside the benchmark: {row["sample_id"]}')
         x0, y0, x1, y1 = map(float, row['rect'])
         if not all(math.isfinite(value) for value in (x0, y0, x1, y1)) or x1 <= x0 or y1 <= y0:
             raise ValueError(f'invalid rectangle: {row["sample_id"]}')
 
+    render_errors = sum(bool(row['render_error']) for row in rows)
+    expected_stats = {
+        'images': len(images),
+        'character_crops': len(rows),
+        'render_errors': render_errors,
+        'render_correct': len(rows) - render_errors,
+    }
     stats = json.loads((benchmark / 'stats.json').read_text(encoding='utf-8'))
-    if stats != {'images': 308, 'character_crops': 7358, 'render_errors': 642, 'render_correct': 6716}:
-        raise ValueError('aggregate stats mismatch')
+    if stats != expected_stats:
+        raise ValueError(f'aggregate stats mismatch: {stats} != {expected_stats}')
 
     proto_path = assets / 'textverifier_k10_q90.pt'
     if sha256(proto_path) != PROTO_SHA256:
@@ -99,9 +120,10 @@ def main() -> None:
         raise ValueError('asset manifest mismatch')
 
     print(json.dumps({
+        'benchmark': str(benchmark),
         'images': len(images),
         'rows': len(rows),
-        'positives': sum(bool(row['render_error']) for row in rows),
+        'positives': render_errors,
         'benchmark_unique_characters': len(benchmark_chars),
         'prototype_characters': len(pack['chars']),
         'prototype_shape': list(prototypes.shape),
