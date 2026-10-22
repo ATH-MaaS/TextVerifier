@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "architecture": "TextVerifier Stage-3, ViT-L/16 image encoder, IDS-aware dual encoder",
+  "image_size": 128,
+  "embedding_dim": 1024,
+  "prototype_shape": [
+    8189,
+    10,
+    1024
+  ],
+  "num_characters": 8189,
+  "K": 10,
+  "threshold": 0.02152947708964348,
+  "error_score_rule": "1 - max_j cosine(image_embedding, prototypes[target_character, j])",
+  "prediction_rule": "render_error if error_score > threshold",
+  "prototype_norm_min": 0.9999998211860657,
+  "prototype_norm_max": 1.0000001192092896
+}

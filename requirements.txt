@@ -1,0 +1,19 @@
+# TextVerifier runtime dependencies
+#
+# Recommended environment: Python 3.10 with a CUDA-enabled PyTorch build.
+# Install torch and torchvision using the wheel index matching your CUDA runtime,
+# then install this file:
+#
+#   pip install torch torchvision --index-url https://download.pytorch.org/whl/cu126
+#   pip install -r requirements.txt
+#
+# For CPU-only use, install CPU PyTorch wheels instead.
+
+torch>=2.4.0,<3.0
+torchvision>=0.19.0,<0.24
+timm>=1.0.0,<2.0
+transformers>=4.50.0,<6.0
+numpy>=1.24.0,<3.0
+Pillow>=10.0.0,<13.0
+datasets>=3.0.0,<5.0
+huggingface_hub>=0.26.0,<2.0
